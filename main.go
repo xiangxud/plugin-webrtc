@@ -14,6 +14,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
+	DefaultCodec "github.com/Monibuca/utils/v3/codec"
 
 	"github.com/Monibuca/engine/v3"
 	"github.com/Monibuca/plugin-webrtc/v3/webrtc"
@@ -414,4 +415,243 @@ func run() {
 			w.Write([]byte("bad name"))
 		}
 	})
+
+
+
+	http.HandleFunc("/api/webrtc/playpro", func(w http.ResponseWriter, r *http.Request) {
+		utils.CORS(w, r)
+
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Access-Control-Allow-Methods", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		w.Header().Set("Access-Control-Expose-Headers", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Content-Type", "application/json")
+		streamPath := r.URL.Query().Get("streamPath")
+		var offer SessionDescription
+		var rtc WebRTC
+		sub := engine.Subscriber{
+			ID:   r.RemoteAddr,
+			Type: "WebRTC",
+		}
+		bytes, err := ioutil.ReadAll(r.Body)
+		defer func() {
+			if err != nil {
+				utils.Println(err)
+				fmt.Fprintf(w, `{"errmsg":"%s"}`, err)
+				return
+			}
+		}()
+		if err != nil {
+			return
+		}
+		if err = json.Unmarshal(bytes, &offer); err != nil {
+			return
+		}
+
+		if err = sub.Subscribe(streamPath); err != nil {
+			return
+		}
+
+		if rtc.PeerConnection, err = api.NewPeerConnection(Configuration{}); err != nil {
+			return
+		}
+
+		rtc.OnICECandidate(func(ice *ICECandidate) {
+			if ice != nil {
+				utils.Println(ice.ToJSON().Candidate)
+			}
+		})
+		if err = rtc.SetRemoteDescription(offer); err != nil {
+			return
+		}
+
+		vt := sub.WaitVideoTrack("h264", "h265")
+		var videoTrack *TrackLocalStaticRTP
+		var rtpSender *RTPSender
+		
+
+
+
+		isH265 := false
+		if vt != nil {
+			pli := "42001f"
+			pli = fmt.Sprintf("%x", vt.ExtraData.NALUs[0][1:4])
+			if !strings.Contains(offer.SDP, pli) {
+				pli = reg_level.FindAllStringSubmatch(offer.SDP, -1)[0][1]
+			}
+
+			if videoTrack, err = NewTrackLocalStaticRTP(RTPCodecCapability{MimeType: MimeTypeH264, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=" + pli}, "video", "m7s"); err != nil {
+				return
+			}
+
+
+			var vpacketer rtp.Packetizer
+			ssrc := uintptr(unsafe.Pointer(&sub))
+
+			//对h264和h265进行不同处理,完成流的添加
+			switch vt.CodecID {
+				case DefaultCodec.CodecID_H264:
+					vpacketer = rtp.NewPacketizer(1200, 96, uint32(ssrc), &codecs.H264Payloader{}, rtp.NewFixedSequencer(1), 90000)
+				case DefaultCodec.CodecID_H265:
+					isH265 = true
+					vpacketer = rtp.NewPacketizer(1200, 96, uint32(ssrc), &H265Payloader{}, rtp.NewFixedSequencer(1), 90000)
+			}
+
+			start := time.Now().UnixMilli()
+			var rtcDc *DataChannel			
+			if isH265 {
+				nInSendH265Track :=0
+				rtc.PeerConnection.OnDataChannel(func(dc *DataChannel) {
+					rtcDc = dc
+					rtcDc.OnOpen(func() {
+	 					nInSendH265Track++
+						timestamp := time.Now().UnixMilli()
+						fmt.Printf("dc.OnOpen %d\n", nInSendH265Track)
+						sendH265ImportFrame(rtcDc, NALU_H265_SEI,timestamp-start)
+						sendH265ImportFrame(rtcDc, NALU_H265_VPS,timestamp-start)
+						sendH265ImportFrame(rtcDc, NALU_H265_SPS,timestamp-start)
+						sendH265ImportFrame(rtcDc, NALU_H265_PPS,timestamp-start)
+						sendH265ImportFrame(rtcDc, NALU_H265_IFRAME,timestamp-start)
+				 
+					})
+
+					rtcDc.OnMessage(func(msg DataChannelMessage) {
+						msg_ := string(msg.Data)
+						fmt.Println(msg_)
+				 
+					})
+
+					rtcDc.OnClose(func() {
+						fmt.Println("hd265 dc close")
+						nInSendH265Track--
+						// syschan <- struct{}{}
+					})
+				})	
+			}
+			
+
+
+			rtpSender, err = rtc.AddTrack(videoTrack)
+			if err != nil {
+				return
+			}
+			var lastTimeStampV uint32
+			
+			sub.OnVideo = func(ts uint32, pack *engine.VideoPack) {
+				if !isH265 {
+					var s uint32 = 40
+					if lastTimeStampV > 0 {
+						s = ts - lastTimeStampV
+					}
+					lastTimeStampV = ts
+					if pack.IDR {
+						for _, nalu := range vt.ExtraData.NALUs {
+							for _, packet := range vpacketer.Packetize(nalu, 0) {
+								err = videoTrack.WriteRTP(packet)
+							}
+						}
+					}
+					for naluIndex, nalu := range pack.NALUs {
+						var packets []*rtp.Packet
+						if naluIndex == len(pack.NALUs)-1 {
+							packets = vpacketer.Packetize(nalu, s)
+						} else {
+							packets = vpacketer.Packetize(nalu, 0)
+						}
+						for packIndex, packet := range packets {
+							packet.Marker = naluIndex == len(pack.NALUs)-1 && packIndex == len(packets)-1
+							err = videoTrack.WriteRTP(packet)
+						}
+					}
+				}else{					
+					var h265frame []byte
+					if pack.IDR {					
+						for _, nalu := range vt.ExtraData.NALUs {
+							for _, packet := range vpacketer.Packetize(nalu, 0) {
+								if len(h265frame)==0 {
+									h265frame = Add3ZoneOne(packet.Payload)
+								}else{
+									h265frame = AddBufs(h265frame,Add3ZoneOne(packet.Payload))
+								}
+							}
+						}
+
+						h265frame = AddBufs(h265frame,Add3ZoneOne(pack.NALUs[0]))
+					}else{
+						h265frame = Add3ZoneOne(pack.NALUs[0])
+					}
+					timestamp := time.Now().UnixMilli()
+					SendH265FrameData(rtcDc,h265frame,timestamp-start)
+				}
+			}
+			go func() {
+				rtcpBuf := make([]byte, 1500)
+				for {
+					if n, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+
+						return
+					} else {
+						if p, err := rtcp.Unmarshal(rtcpBuf[:n]); err == nil {
+							for _, pp := range p {
+								switch pp.(type) {
+								case *rtcp.PictureLossIndication:
+
+									fmt.Println("PictureLossIndication")
+								}
+							}
+						}
+					}
+				}
+			}()
+		}
+		
+		if bytes, err := rtc.GetAnswer(); err == nil {
+			ret := WebRtcReturn{}
+			json.Unmarshal(bytes, &ret)
+			ret.IsH265 = isH265
+			utils.Println(ret)
+			byt, _ := json.Marshal(ret)
+			w.Write(byt)
+			rtc.OnConnectionStateChange(func(pcs PeerConnectionState) {
+				utils.Printf("%s Connection State has changed %s ", streamPath, pcs.String())
+				switch pcs {
+				case PeerConnectionStateConnected:
+					
+					if vt != nil {
+						go sub.PlayVideo(vt)
+					}
+				case PeerConnectionStateDisconnected, PeerConnectionStateFailed:
+					sub.Close()
+					rtc.PeerConnection.Close()
+				}
+			})
+
+		} else {
+			return
+		}
+	})
+	
+}
+
+
+
+
+type H265Payloader struct{}
+
+func (p *H265Payloader) Payload(mtu uint16, payload []byte) [][]byte {
+	var out [][]byte
+	if payload == nil || mtu == 0 {
+		return out
+	}
+
+	for len(payload) > int(mtu) {
+		o := make([]byte, mtu)
+		copy(o, payload[:mtu])
+		payload = payload[mtu:]
+		out = append(out, o)
+	}
+	o := make([]byte, len(payload))
+	copy(o, payload)
+	return append(out, o)
 }
