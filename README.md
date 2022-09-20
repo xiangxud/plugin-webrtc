@@ -1,6 +1,10 @@
 # webrtc 插件
 
-提供通过网页发布视频到monibuca，以及从monibuca拉流通过webrtc进行播放的功能
+提供通过网页发布视频到monibuca，以及从monibuca拉流通过webrtc进行播放的功能,该分支增加了对h265的视频流播放,
+该插件为项目:
+[https://github.com/langhuihui/monibuca.git](https://github.com/langhuihui/monibuca.git)
+v3版本组件,后续会添加v4版本的h265播放
+
 
 # 基本原理
 
