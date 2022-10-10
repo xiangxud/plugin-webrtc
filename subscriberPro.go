@@ -3,11 +3,10 @@ package webrtc
 import (
 	"fmt"
 	"strings"
-
+	"net"
 	"github.com/pion/rtcp"
 	. "github.com/pion/webrtc/v3"
 	. "m7s.live/engine/v4"
-	"m7s.live/engine/v4/common"
 	"time"
 	"m7s.live/engine/v4/codec"
 	"m7s.live/engine/v4/track"
@@ -61,28 +60,6 @@ func (suber *WebRTCSubscriberPro) OnEvent(event any) {
 			nInSendH265Track :=0
 			suber.PeerConnection.OnDataChannel(func(dc *DataChannel) {
 				rtcDc = dc
-				rtcDc.OnOpen(func() {
-					va := v.IDRing.Value
-					fmt.Printf("dc.OnOpen %d\n", nInSendH265Track)
-
-					var h265frame []byte
-
-					if va.IFrame { //如果是关键帧,增加关键帧头
-						h265frame = []byte{0,0,0,1,64,1,12,1,255,255,1,96,0,0,3,0,176,0,0,3,0,0,3,0,123,172,12,0,0,56,64,0,5,126,66,168,0,0,0,1,66,1,1,1,96,0,0,3,0,176,0,0,3,0,0,3,0,123,160,3,192,128,16,229,141,174,228,203,243,112,16,16,16,64,0,3,132,0,0,87,228,40,64,0,0,0,1,68,1,192,242,176,59,36}
-					}
-
-					for _, packets := range va.Raw {
-						for _, packet := range packets {
-							if len(h265frame)==0 {
-								h265frame = Add3ZoneOne(packet)
-							}else{
-								h265frame = AddBufs(h265frame,Add3ZoneOne(packet))
-							}
-						}
-					}
-					SendH265FrameData(rtcDc,h265frame,va.Timestamp.UnixMilli()-start)
-			 
-				})
 
 				rtcDc.OnMessage(func(msg DataChannelMessage) {
 					msg_ := string(msg.Data)
@@ -96,40 +73,23 @@ func (suber *WebRTCSubscriberPro) OnEvent(event any) {
 					// syschan <- struct{}{}
 				})
 			})
-			// frame := VideoDeConf( v.DecoderConfiguration )
-			// fmt.Println("*****b*******:",frame)
-			// F := (*VideoFrame)(frame)
-			go v.Play(suber.IO, func(va *common.AVFrame[common.NALUSlice]) error {
-				
-			// 	// VideoDeConf(v.DecoderConfiguration).GetAnnexB()
-			// 	b: = F.GetAnnexB()
 
-				// frame := (*VideoFrame)(va)
-				// fmt.Println("*****frame*******:",frame.GetAnnexB())
-				// fmt.Println("*****va.IFrame*******:",va.IFrame)
-				// fmt.Println("*****frame.IFrame*******:",frame.IFrame)
+
+
+			go v.PlayFullAnnexB(suber.IO, func(frame net.Buffers) error {
 				var h265frame []byte
-
-				if va.IFrame { //如果是关键帧,增加关键帧头
-					h265frame = []byte{0,0,0,1,64,1,12,1,255,255,1,96,0,0,3,0,176,0,0,3,0,0,3,0,123,172,12,0,0,56,64,0,5,126,66,168,0,0,0,1,66,1,1,1,96,0,0,3,0,176,0,0,3,0,0,3,0,123,160,3,192,128,16,229,141,174,228,203,243,112,16,16,16,64,0,3,132,0,0,87,228,40,64,0,0,0,1,68,1,192,242,176,59,36}
-				}
-
-				for _, packets := range va.Raw {
-					for _, packet := range packets {
-						if len(h265frame)==0 {
-							h265frame = Add3ZoneOne(packet)
-						}else{
-							h265frame = AddBufs(h265frame,Add3ZoneOne(packet))
-						}
+				for _, packet := range frame {
+					if len(h265frame)==0 {
+						h265frame = packet
+					}else{
+						h265frame = AddBufs(h265frame,packet)
 					}
 				}
-				// timestamp := time.Now().UnixMilli()
-				// fmt.Println("*****h265frame*******:",h265frame)
-				SendH265FrameData(rtcDc,h265frame,va.Timestamp.UnixMilli()-start)
-				// SendH265FrameData(rtcDc,h265frame,frame.Timestamp.UnixMilli()-start)
-				// SendH265FrameData(rtcDc,h265frame,timestamp-start)
+				timestamp := time.Now().UnixMilli()
+				SendH265FrameData(rtcDc,h265frame,timestamp-start)
 				return nil
 			})
+
 		}
 
 	case *track.Audio:
