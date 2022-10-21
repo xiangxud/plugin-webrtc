@@ -61,7 +61,7 @@ const (
 // }
 
 func SendH265FrameData(dc *DataChannel, data []byte,timestamp int64) {
-	if len(data) > 0 && dc != nil && dc.ReadyState() == DataChannelStateOpen {
+	if len(data) > 4 && dc != nil && dc.ReadyState() == DataChannelStateOpen {
 		var frametypestr string
 		glength := len(data)
 		count := glength / MAXPACKETSIZE
