@@ -38,28 +38,6 @@ const (
 )
 
 
-// //重要帧发送
-// func sendH265ImportFrame(dc *DataChannel, frametype uint16,timestamp int64) {
-// 	switch frametype {
-// 	case NALU_H265_VPS:
-// 		SendH265FrameData(dc, vpsFrame, timestamp)
- 
-// 	case NALU_H265_SPS:
-// 		SendH265FrameData(dc, vpsFrame, timestamp)
- 
-// 	case NALU_H265_PPS:
-// 		SendH265FrameData(dc, ppsFrame, timestamp)
- 
-// 	case NALU_H265_SEI:
-// 		SendH265FrameData(dc, seiFrame, timestamp)
- 
-// 	case NALU_H265_IFRAME:
-// 		SendH265FrameData(dc, keyFrame, timestamp)
- 
-// 	default:
-// 	}
-// }
-
 func SendH265FrameData(dc *DataChannel, data []byte,timestamp int64) {
 	if len(data) > 4 && dc != nil && dc.ReadyState() == DataChannelStateOpen {
 		var frametypestr string
@@ -74,7 +52,6 @@ func SendH265FrameData(dc *DataChannel, data []byte,timestamp int64) {
 		if err != nil {
  
 		} else {
-			// SaveFrameKeyData(data, frametype)
 			frametypestr, err = GetFrameTypeName(frametype)
 		}
 
@@ -148,29 +125,6 @@ func FindStartCode3(Buf []byte) bool {
 		return true
 	}
 }
-
-// var vpsFrame []byte
-// var spsFrame []byte
-// var ppsFrame []byte
-// var seiFrame []byte
-// var keyFrame []byte
-
-// func SaveFrameKeyData(pdata []byte, frametype uint16) {
-// 	switch frametype {
-// 	case NALU_H265_VPS:
-// 		vpsFrame = pdata
-// 	case NALU_H265_SPS:
-// 		spsFrame = pdata
-// 	case NALU_H265_PPS:
-// 		ppsFrame = pdata
-// 	case NALU_H265_SEI:
-// 		seiFrame = pdata
-// 	case NALU_H265_IFRAME:
-// 		keyFrame = pdata
-// 	default:
-// 	}
-// }
-
 
 func Add3ZoneOne(h265frame []byte) []byte{
 	var hBuf = [4]byte{0, 0, 0, 1}

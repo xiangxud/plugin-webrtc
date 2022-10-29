@@ -61,6 +61,28 @@ func (suber *WebRTCSubscriberPro) OnEvent(event any) {
 			suber.PeerConnection.OnDataChannel(func(dc *DataChannel) {
 				rtcDc = dc
 
+				rtcDc.OnOpen(func() {
+					va := v.IDRing.Value
+					// R := v.DecoderConfiguration.Raw
+					annexB := VideoDeConf(v.DecoderConfiguration).GetAnnexB()
+
+
+					var h265frame []byte
+
+					for _, p :=range annexB {//拼接消息头
+						h265frame = AddBufs(h265frame,p)
+					}
+
+					for _, packets := range va.Raw {
+						for _, packet := range packets {
+							h265frame = AddBufs(h265frame,Add3ZoneOne(packet))
+						}
+					}
+					SendH265FrameData(rtcDc,h265frame,va.Timestamp.UnixMilli()-start)
+
+				})
+
+
 				rtcDc.OnMessage(func(msg DataChannelMessage) {
 					msg_ := string(msg.Data)
 					fmt.Println(msg_)
@@ -86,6 +108,7 @@ func (suber *WebRTCSubscriberPro) OnEvent(event any) {
 					}
 				}
 				timestamp := time.Now().UnixMilli()
+				// fmt.Println("推流:",h265frame)
 				SendH265FrameData(rtcDc,h265frame,timestamp-start)
 				return nil
 			})
